@@ -1,43 +1,28 @@
 package main
 
 import (
-	"database/sql"
+	"regexp"
+	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
-// Struct untuk menampung hasil query
-type MonthlyTopCustomer struct {
-	Month        string
-	CustomerName string
-	TotalOrder   int
-}
+func TestGetTopCustomerPerMonth(t *testing.T) {
+	// 1. Setup Mock DB
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+	defer db.Close()
 
-type LocationStats struct {
-	Location   string
-	TotalOrder int
-}
+	repo := NewReportRepository(db)
 
-type HourlyStats struct {
-	Hour       int
-	TotalOrder int
-}
+	// 2. Siapkan Data Dummy yang diharapkan kembali
+	rows := sqlmock.NewRows([]string{"bulan", "name", "total"}).
+		AddRow("2025-12", "Andre", 2).
+		AddRow("2025-11", "Budi", 1)
 
-// Repository Interface
-type ReportRepository interface {
-	GetTopCustomerPerMonth() ([]MonthlyTopCustomer, error)
-	GetTopLocations() ([]LocationStats, error)
-	GetHourlyStats() ([]HourlyStats, error)
-}
-
-type reportRepo struct {
-	db *sql.DB
-}
-
-func NewReportRepository(db *sql.DB) ReportRepository {
-	return &reportRepo{db: db}
-}
-
-// Fitur 2: Top Customer Per Bulan
-func (r *reportRepo) GetTopCustomerPerMonth() ([]MonthlyTopCustomer, error) {
+	// 3. Query yang diharapkan (Sama persis dengan di repository.go)
 	query := `
 		SELECT 
 			TO_CHAR(start_time, 'YYYY-MM') as bulan,
@@ -48,75 +33,78 @@ func (r *reportRepo) GetTopCustomerPerMonth() ([]MonthlyTopCustomer, error) {
 		GROUP BY bulan, c.name
 		ORDER BY bulan DESC, total DESC
 	`
-	rows, err := r.db.Query(query)
+
+	// PENTING: Gunakan regexp.QuoteMeta agar simbol () dibaca sebagai text biasa
+	mock.ExpectQuery(regexp.QuoteMeta(query)).WillReturnRows(rows)
+
+	// 4. Jalankan Fungsi
+	results, err := repo.GetTopCustomerPerMonth()
+
+	// 5. Validasi (Assert)
 	if err != nil {
-		return nil, err
+		t.Errorf("error was not expected: %s", err)
+		return
 	}
-	defer rows.Close()
 
-	var results []MonthlyTopCustomer
-	processedMonths := make(map[string]bool)
-
-	for rows.Next() {
-		var d MonthlyTopCustomer
-		if err := rows.Scan(&d.Month, &d.CustomerName, &d.TotalOrder); err != nil {
-			return nil, err
-		}
-		
-		if !processedMonths[d.Month] {
-			results = append(results, d)
-			processedMonths[d.Month] = true
-		}
+	// Cek apakah hasil kosong (Mencegah Panic index out of range)
+	if len(results) == 0 {
+		t.Errorf("expected results, got empty list")
+		return
 	}
-	return results, nil
+
+	// Cek Data Pertama
+	if results[0].CustomerName != "Andre" {
+		t.Errorf("expected CustomerName Andre, got %s", results[0].CustomerName)
+	}
+	if results[0].TotalOrder != 2 {
+		t.Errorf("expected TotalOrder 2, got %d", results[0].TotalOrder)
+	}
+
+	// Pastikan semua ekspektasi terpenuhi
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
 }
 
-// Fitur 3: Lokasi Terbanyak
-func (r *reportRepo) GetTopLocations() ([]LocationStats, error) {
+func TestGetTopLocations(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+	}
+	defer db.Close()
+
+	repo := NewReportRepository(db)
+
+	rows := sqlmock.NewRows([]string{"pickup_location", "total"}).
+		AddRow("Grogol", 10).
+		AddRow("ITPLN", 5)
+
 	query := `
 		SELECT pickup_location, COUNT(*) as total 
 		FROM ride 
 		GROUP BY pickup_location 
 		ORDER BY total DESC
 	`
-	rows, err := r.db.Query(query)
+
+	mock.ExpectQuery(regexp.QuoteMeta(query)).WillReturnRows(rows)
+
+	stats, err := repo.GetTopLocations()
+
 	if err != nil {
-		return nil, err
+		t.Errorf("error was not expected: %s", err)
+		return
 	}
-	defer rows.Close()
 
-	var results []LocationStats
-	for rows.Next() {
-		var l LocationStats
-		if err := rows.Scan(&l.Location, &l.TotalOrder); err != nil {
-			return nil, err
-		}
-		results = append(results, l)
+	if len(stats) == 0 {
+		t.Errorf("expected results, got empty list")
+		return
 	}
-	return results, nil
-}
 
-// Fitur 4: Waktu Ramai
-func (r *reportRepo) GetHourlyStats() ([]HourlyStats, error) {
-	query := `
-		SELECT EXTRACT(HOUR FROM start_time) as jam, COUNT(*) as total 
-		FROM ride 
-		GROUP BY jam 
-		ORDER BY total DESC
-	`
-	rows, err := r.db.Query(query)
-	if err != nil {
-		return nil, err
+	if stats[0].Location != "Grogol" {
+		t.Errorf("expected top location to be Grogol, got %s", stats[0].Location)
 	}
-	defer rows.Close()
-
-	var results []HourlyStats
-	for rows.Next() {
-		var h HourlyStats
-		if err := rows.Scan(&h.Hour, &h.TotalOrder); err != nil {
-			return nil, err
-		}
-		results = append(results, h)
+	
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
-	return results, nil
 }
