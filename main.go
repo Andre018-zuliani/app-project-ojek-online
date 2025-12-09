@@ -10,7 +10,7 @@ import (
 
 func main() {
 	// Pastikan connection string ini sesuai dengan settingan Postgre di laptopmu
-	connStr := "host=127.0.0.1 port=5432 user=postgres password=password dbname=ojek_online sslmode=disable"
+	connStr := "host=127.0.0.1 port=5432 user=postgres password=lia123 dbname=ojek_online sslmode=disable"
 	
 	// Perbaikan: Gunakan sql.Open, BUKAN db.Connect
 	db, err := sql.Open("postgres", connStr)
